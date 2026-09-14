@@ -12,6 +12,7 @@ import { ManageUsersPage } from './pages/ManageUsersPage';
 import { RolesPermissionsPage } from './pages/RolesPermissionsPage';
 import { ManageLocationsPage } from './pages/ManageLocationsPage';
 import { DisciplesDirectoryPage } from './pages/DisciplesDirectoryPage';
+import { ReportsPage } from './pages/ReportsPage';   // add this line
 import { DiscipleFormPage } from './pages/DiscipleFormPage';
 import { DiscipleBulkAddPage } from './pages/DiscipleBulkAddPage';
 import { SettingsPage } from './pages/SettingsPage';
@@ -42,6 +43,7 @@ function App() {
             <Route path="/disciples/bulk-add" element={<DiscipleBulkAddPage />} />
             <Route path="/disciples/import" element={<DiscipleExcelImportPage />} />
             <Route path="/disciples/:id/edit" element={<DiscipleFormPage />} />
+            <Route path="/reports" element={<ReportsPage />} />   {/* add this line */}
             <Route path="/settings" element={<SettingsPage />} />
           </Route>
  
