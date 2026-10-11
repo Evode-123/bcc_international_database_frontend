@@ -5,7 +5,7 @@ import { AppLayout } from '../components/AppLayout';
 import { ConfirmModal } from '../components/Modal';
 import * as disciplesApi from '../api/disciples';
 import * as lookupsApi from '../api/lookups';
-import { parseDiscipleImportFile } from '../api/discipleImport';
+import { checkDiscipleImportFile, commitDiscipleImportFile } from '../api/discipleImport';
 
 const GENDERS = ['Male', 'Female'];
 const TRAINING_MODES = ['Online', 'In-person'];
@@ -235,6 +235,13 @@ export function DiscipleExcelImportPage() {
   const [totalSaved, setTotalSaved] = useState(0);
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
 
+  // Bulk import (up to 20,000 rows): the file is checked first, then every
+  // valid row is saved in one go on the server.
+  const [selectedFile, setSelectedFile] = useState(null); // set while a valid import is waiting for the click
+  const [preview, setPreview] = useState(null); // counts from the last check / import
+  const [isImporting, setIsImporting] = useState(false);
+  const [importDone, setImportDone] = useState(null); // { saved, skipped } after a bulk import
+
   useEffect(() => {
     lookupsApi.fetchContinents().then(setContinents).catch(() => {});
     lookupsApi.fetchLanguages().then(setLanguages).catch(() => {});
@@ -246,45 +253,75 @@ export function DiscipleExcelImportPage() {
     return 'ready';
   }
 
+  // Turns the rows the server flagged into the shape this page edits.
+  function mapApiRows(apiRows) {
+    return apiRows.map((r) => ({
+      key: r.rowNumber,
+      status: r.status,
+      errors: r.errors,
+      raw: r.raw,
+      suggestions: r.suggestions,
+      edited: {
+        familyName: r.payload.familyName,
+        otherNames: r.payload.otherNames,
+        gender: r.payload.gender,
+        dateOfBirth: r.payload.dateOfBirth,
+        phoneNumber: r.payload.phoneNumber,
+        email: r.payload.email,
+        city: r.payload.city,
+        fellowshipChurch: r.payload.fellowshipChurch,
+        graduationYear: r.payload.training.graduationYear || '',
+        trainingMode: r.payload.training.trainingMode,
+        trainingLanguageId: r.payload.training.trainingLanguageId,
+        continentId: r.resolvedIds.continentId,
+        countryId: r.resolvedIds.countryId,
+        centerId: r.resolvedIds.centerId,
+        trainingSiteId: r.payload.trainingSiteId,
+      },
+    }));
+  }
+
+  // Step 1: check the file. Nothing is saved yet.
   async function handleFileChange(e) {
     const file = e.target.files?.[0];
     if (!file) return;
     setParseError('');
     setIsParsing(true);
     setRows([]);
+    setPreview(null);
+    setImportDone(null);
+    setSelectedFile(null);
     setTotalSaved(0);
     try {
-      const result = await parseDiscipleImportFile(file);
-      const mapped = result.rows.map((r) => ({
-        key: r.rowNumber,
-        status: r.status,
-        errors: r.errors,
-        raw: r.raw,
-        suggestions: r.suggestions,
-        edited: {
-          familyName: r.payload.familyName,
-          otherNames: r.payload.otherNames,
-          gender: r.payload.gender,
-          dateOfBirth: r.payload.dateOfBirth,
-          phoneNumber: r.payload.phoneNumber,
-          email: r.payload.email,
-          city: r.payload.city,
-          fellowshipChurch: r.payload.fellowshipChurch,
-          graduationYear: r.payload.training.graduationYear || '',
-          trainingMode: r.payload.training.trainingMode,
-          trainingLanguageId: r.payload.training.trainingLanguageId,
-          continentId: r.resolvedIds.continentId,
-          countryId: r.resolvedIds.countryId,
-          centerId: r.resolvedIds.centerId,
-          trainingSiteId: r.payload.trainingSiteId,
-        },
-      }));
-      setRows(mapped);
+      const result = await checkDiscipleImportFile(file);
+      setRows(mapApiRows(result.rows));
+      setPreview(result);
+      // Keep the file only if there is something to import.
+      setSelectedFile(result.readyCount > 0 ? file : null);
     } catch (err) {
       setParseError(err.response?.data?.error || 'Could not read this file. Please check the format and try again.');
     } finally {
       setIsParsing(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  }
+
+  // Step 2: save every valid row in bulk on the server.
+  async function handleImportReady() {
+    if (!selectedFile || !preview || preview.readyCount === 0) return;
+    setParseError('');
+    setIsImporting(true);
+    try {
+      const result = await commitDiscipleImportFile(selectedFile);
+      setRows(mapApiRows(result.rows));
+      setTotalSaved((prev) => prev + result.savedCount);
+      setImportDone({ saved: result.savedCount, skipped: result.skippedDuplicates });
+      setPreview({ ...result, readyCount: 0 });
+      setSelectedFile(null);
+    } catch (err) {
+      setParseError(err.response?.data?.error || 'The import could not be completed. Please try again.');
+    } finally {
+      setIsImporting(false);
     }
   }
 
@@ -307,7 +344,7 @@ export function DiscipleExcelImportPage() {
   const pendingRows = rows.filter((r) => r.status !== 'ready' && r.status !== 'saved');
 
   function handleLeave() {
-    if (rows.length > 0) {
+    if (rows.length > 0 || selectedFile) {
       setShowLeaveConfirm(true);
       return;
     }
@@ -384,7 +421,7 @@ export function DiscipleExcelImportPage() {
           </div>
         </div>
         <p className="text-sm text-gray-500 mb-6">
-          Upload a spreadsheet, fix anything flagged, then save. Nothing is written to the database until you click "Save."
+          Upload a spreadsheet (up to 20,000 rows). The file is checked first, and nothing is saved until you click "Import."
         </p>
 
         {/* Upload card */}
@@ -401,7 +438,7 @@ export function DiscipleExcelImportPage() {
                 type="file"
                 accept=".xlsx,.xls"
                 onChange={handleFileChange}
-                disabled={isParsing}
+                disabled={isParsing || isImporting}
                 className="block w-full text-sm text-gray-600
                            file:mr-4 file:py-2.5 file:px-4 file:rounded-xl file:border-0
                            file:text-sm file:font-semibold file:bg-brand file:text-white
@@ -413,7 +450,7 @@ export function DiscipleExcelImportPage() {
             Location columns (continent, country, center, site) must use the exact names already set up under
             Plan → Locations. Anything that doesn't match will be flagged below for you to fix or pick from a dropdown.
           </p>
-          {isParsing && <p className="text-sm text-brand mt-3">Reading file…</p>}
+          {isParsing && <p className="text-sm text-brand mt-3">Checking file… large files can take a minute.</p>}
           {parseError && (
             <div className="mt-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
               {parseError}
@@ -421,12 +458,70 @@ export function DiscipleExcelImportPage() {
           )}
         </div>
 
-        {rows.length > 0 && (
+        {/* Bulk import summary */}
+        {preview && (
+          <div className="bg-white rounded-xl border border-gray-200 p-5 mb-5">
+            <div className="flex flex-wrap items-center gap-2 mb-3">
+              <span className="text-xs font-semibold px-3 py-1.5 rounded-full bg-gray-50 text-gray-600 border border-gray-200">
+                {preview.totalRows.toLocaleString()} rows in file
+              </span>
+              {importDone ? (
+                <span className="text-xs font-semibold px-3 py-1.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  {importDone.saved.toLocaleString()} imported
+                </span>
+              ) : (
+                <span className="text-xs font-semibold px-3 py-1.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  {preview.readyCount.toLocaleString()} ready to import
+                </span>
+              )}
+              {preview.skippedDuplicates > 0 && (
+                <span className="text-xs font-semibold px-3 py-1.5 rounded-full bg-gray-50 text-gray-600 border border-gray-200">
+                  {preview.skippedDuplicates.toLocaleString()} already in the system (skipped)
+                </span>
+              )}
+              <span className="text-xs font-semibold px-3 py-1.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+                {preview.needsAttentionCount.toLocaleString()} need attention
+              </span>
+            </div>
+
+            {selectedFile && (
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <p className="text-xs text-gray-500">
+                  {isImporting
+                    ? 'Importing… please keep this page open. Large files can take a few minutes.'
+                    : `Rows that need attention won't be imported — you can fix them here afterwards.`}
+                </p>
+                <button
+                  type="button"
+                  onClick={handleImportReady}
+                  disabled={isImporting}
+                  className="px-5 py-2.5 rounded-xl text-sm font-semibold bg-brand text-white hover:bg-brand-dark
+                             disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+                >
+                  {isImporting ? 'Importing…' : `Import ${preview.readyCount.toLocaleString()} disciple${preview.readyCount === 1 ? '' : 's'}`}
+                </button>
+              </div>
+            )}
+
+            {!selectedFile && preview.needsAttentionCount === 0 && importDone && (
+              <p className="text-sm text-emerald-700">Everything in the file has been imported.</p>
+            )}
+
+            {preview.rowsTruncated && !selectedFile && (
+              <p className="text-xs text-amber-700 mt-2">
+                Showing the first {rows.length} of {preview.needsAttentionCount.toLocaleString()} rows that need attention.
+                Fix the rest in your spreadsheet and upload it again — rows already imported are skipped automatically.
+              </p>
+            )}
+          </div>
+        )}
+
+        {rows.length > 0 && !selectedFile && (
           <>
             {/* Summary */}
             <div className="flex flex-wrap items-center gap-2 mb-4">
               <span className="text-xs font-semibold px-3 py-1.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
-                {readyRows.length} ready
+                {readyRows.length} fixed, ready to save
               </span>
               <span className="text-xs font-semibold px-3 py-1.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
                 {pendingRows.length} need review
