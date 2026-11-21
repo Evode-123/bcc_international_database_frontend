@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
   import { NavLink, useNavigate, useLocation } from 'react-router-dom';
   import { useAuth } from '../context/AuthContext';
   import { TopbarSearch } from './TopbarSearch';
+  import { roleLabel, scopeSummary } from '../utils/roles';
 
   // ── Icons ─────────────────────────────────────────────────────────────────────
 
@@ -485,8 +486,9 @@ import { useEffect, useState } from 'react';
                         <p className="text-xs font-semibold text-gray-800 leading-tight max-w-[110px] truncate">
                           {user?.fullName || user?.email}
                         </p>
-                        <p className="text-[10px] text-brand leading-tight capitalize">
-                          {user?.role?.replace(/_/g, ' ')}
+                        <p className="text-[10px] text-brand leading-tight max-w-[110px] truncate">
+                          {roleLabel(user?.role)}
+                          {user?.scope && user.scope.level !== 'global' ? ` · ${scopeSummary(user)}` : ''}
                         </p>
                       </div>
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"

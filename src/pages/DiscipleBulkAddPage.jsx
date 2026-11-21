@@ -4,6 +4,7 @@ import { AppLayout } from '../components/AppLayout';
 import { useAuth } from '../context/AuthContext';
 import * as disciplesApi from '../api/disciples';
 import * as lookupsApi from '../api/lookups';
+import { useAutoSelectSingle } from '../hooks/useAutoSelectSingle';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -144,8 +145,7 @@ export function DiscipleBulkAddPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
 
-  // Non-null only for site-scoped roles (teacher, leader, or any other
-  // non-admin role) -- see auth.controller.ts's shapeSiteInfo. When set,
+  // Non-null only for a Site Coordinator -- see auth.controller.ts's shapeSiteInfo. When set,
   // the whole "pick a location" step below is skipped: every disciple in
   // this batch goes to this exact site, matching what the backend enforces
   // independently on each save.
@@ -230,6 +230,12 @@ export function DiscipleBulkAddPage() {
       }).catch(() => {});
     }
   }, [centerId]);
+
+  // Overseers only get their own continent/country/center back from the
+  // server, so a list with a single option is selected automatically.
+  useAutoSelectSingle(lockedSite || locationLocked ? [] : continents, continentId, setContinentId);
+  useAutoSelectSingle(countries, countryId, setCountryId);
+  useAutoSelectSingle(centers, centerId, setCenterId);
 
   // ── Location helpers ───────────────────────────────────────────────────────
   const showSiteDropdown = sites.length > 0 && !(sites.length === 1 && sites[0].isDefault);

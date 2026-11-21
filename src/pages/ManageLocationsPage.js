@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { AppLayout } from '../components/AppLayout';
+import { useAuth } from '../context/AuthContext';
+import { locationPowers } from '../utils/roles';
 import { Modal, ConfirmModal } from '../components/Modal';
 import { TextInput } from '../components/TextInput';
 import { Select } from '../components/Select';
@@ -413,6 +415,13 @@ function ActionBtn({ onClick, color = 'gray', children }) {
 // ── Main page ─────────────────────────────────────────────────────────────
 
 export function ManageLocationsPage() {
+  const { user } = useAuth();
+  // What this person may change depends on their level:
+  //   admin / super_admin -> everything
+  //   continent overseer  -> countries, centers and sites in their continent
+  //   country overseer    -> centers and sites in their country
+  // The backend enforces this too; this only hides buttons that can't work.
+  const powers = locationPowers(user);
   const [continents, setContinents] = useState([]);
   const [languages, setLanguages] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -515,14 +524,18 @@ export function ManageLocationsPage() {
         <div>
           <h1 className="text-xl font-bold text-gray-900">Manage locations</h1>
           <p className="text-sm text-gray-500 mt-0.5">
-            Continents, countries, centers, and sites used when adding disciples
+            {powers.level === 'global'
+              ? 'Continents, countries, centers, and sites used when adding disciples'
+              : 'The locations you manage — used when adding disciples'}
           </p>
         </div>
-        <div className="w-36">
-          <Button variant="secondary" type="button" onClick={() => setAddContinentModal(true)}>
-            + Continent
-          </Button>
-        </div>
+        {powers.canManageContinents && (
+          <div className="w-36">
+            <Button variant="secondary" type="button" onClick={() => setAddContinentModal(true)}>
+              + Continent
+            </Button>
+          </div>
+        )}
       </div>
 
       <ErrorBanner message={error} onClose={() => setError('')} />
@@ -534,8 +547,14 @@ export function ManageLocationsPage() {
       >
         {continents.length === 0 && (
           <div className="py-12 text-center">
-            <p className="text-sm font-semibold text-gray-500">No continents yet</p>
-            <p className="text-xs text-gray-400 mt-1">Add a continent to get started</p>
+            <p className="text-sm font-semibold text-gray-500">
+              {powers.canManageContinents ? 'No continents yet' : 'No locations to show yet'}
+            </p>
+            <p className="text-xs text-gray-400 mt-1">
+              {powers.canManageContinents
+                ? 'Add a continent to get started'
+                : 'Nothing has been set up in your area yet.'}
+            </p>
           </div>
         )}
 
@@ -549,22 +568,28 @@ export function ManageLocationsPage() {
             >
               <span className="font-bold text-sm text-gray-900">{continent.name}</span>
               <div className="flex items-center gap-1">
-                <ActionBtn
-                  onClick={() => setAddCountryModal({
-                    continentId: continent.id,
-                    continentName: continent.name,
-                    existingNames: continent.countries.map((c) => c.name),
-                  })}
-                >
-                  + Country
-                </ActionBtn>
-                <ActionBtn onClick={() => setNameModal({ mode: 'edit', level: 'continent', item: continent })}>
-                  Edit
-                </ActionBtn>
-                <ActionBtn color="red"
-                  onClick={() => promptDelete('continent', () => locationsApi.deleteContinent(continent.id))}>
-                  Delete
-                </ActionBtn>
+                {powers.canManageCountries && (
+                  <ActionBtn
+                    onClick={() => setAddCountryModal({
+                      continentId: continent.id,
+                      continentName: continent.name,
+                      existingNames: continent.countries.map((c) => c.name),
+                    })}
+                  >
+                    + Country
+                  </ActionBtn>
+                )}
+                {powers.canManageContinents && (
+                  <>
+                    <ActionBtn onClick={() => setNameModal({ mode: 'edit', level: 'continent', item: continent })}>
+                      Edit
+                    </ActionBtn>
+                    <ActionBtn color="red"
+                      onClick={() => promptDelete('continent', () => locationsApi.deleteContinent(continent.id))}>
+                      Delete
+                    </ActionBtn>
+                  </>
+                )}
               </div>
             </div>
 
@@ -586,12 +611,18 @@ export function ManageLocationsPage() {
                         </span>
                       </button>
                       <div className="flex items-center gap-1">
-                        <ActionBtn onClick={() => setAddCenterModal({ countryId: country.id })}>+ Center</ActionBtn>
-                        <ActionBtn onClick={() => setNameModal({ mode: 'edit', level: 'country', item: country })}>Edit</ActionBtn>
-                        <ActionBtn color="red"
-                          onClick={() => promptDelete('country', () => locationsApi.deleteCountry(country.id))}>
-                          Delete
-                        </ActionBtn>
+                        {powers.canManageCenters && (
+                          <ActionBtn onClick={() => setAddCenterModal({ countryId: country.id })}>+ Center</ActionBtn>
+                        )}
+                        {powers.canManageCountries && (
+                          <>
+                            <ActionBtn onClick={() => setNameModal({ mode: 'edit', level: 'country', item: country })}>Edit</ActionBtn>
+                            <ActionBtn color="red"
+                              onClick={() => promptDelete('country', () => locationsApi.deleteCountry(country.id))}>
+                              Delete
+                            </ActionBtn>
+                          </>
+                        )}
                       </div>
                     </div>
 
@@ -668,11 +699,13 @@ export function ManageLocationsPage() {
       {/* Languages section */}
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-base font-bold text-gray-900">Training languages</h2>
-        <div className="w-36">
-          <Button variant="secondary" type="button" onClick={() => setAddLanguageModal(true)}>
-            + Language
-          </Button>
-        </div>
+        {powers.canManageLanguages && (
+          <div className="w-36">
+            <Button variant="secondary" type="button" onClick={() => setAddLanguageModal(true)}>
+              + Language
+            </Button>
+          </div>
+        )}
       </div>
       <div
         className="rounded-2xl overflow-hidden"
@@ -693,10 +726,12 @@ export function ManageLocationsPage() {
               </div>
               <span className="text-sm font-medium text-gray-800">{lang.name}</span>
             </div>
-            <ActionBtn color="red"
-              onClick={() => promptDelete('language', () => locationsApi.deleteLanguage(lang.id))}>
-              Delete
-            </ActionBtn>
+            {powers.canManageLanguages && (
+              <ActionBtn color="red"
+                onClick={() => promptDelete('language', () => locationsApi.deleteLanguage(lang.id))}>
+                Delete
+              </ActionBtn>
+            )}
           </div>
         ))}
       </div>

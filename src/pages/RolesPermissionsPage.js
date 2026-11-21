@@ -1,66 +1,18 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { AppLayout } from '../components/AppLayout';
-import { Modal } from '../components/Modal';
-import { TextInput } from '../components/TextInput';
-import { Button } from '../components/Button';
 import { ErrorBanner, SuccessBanner } from '../components/Banners';
 import * as permissionsApi from '../api/permissions';
+import { LEVEL_LABELS, roleLabel } from '../utils/roles';
 
-function NewRoleModal({ onClose, onCreated }) {
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [error, setError] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-
-  async function handleSubmit(e) {
-    e.preventDefault();
-    setError('');
-    setIsLoading(true);
-    try {
-      await permissionsApi.createRole(name.trim(), description.trim() || undefined);
-      onCreated();
-    } catch (err) {
-      setError(err.response?.data?.error || 'Could not create the role.');
-    } finally {
-      setIsLoading(false);
-    }
-  }
-
-  return (
-    <Modal title="New role" subtitle="Starts with no permissions granted" onClose={onClose}>
-      <ErrorBanner message={error} />
-      <form onSubmit={handleSubmit}>
-        <TextInput
-          label="Role name"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="e.g. coordinator"
-          required
-          autoFocus
-        />
-        <TextInput
-          label="Description"
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          placeholder="Optional"
-        />
-        <div className="flex justify-end gap-2 mt-2">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-lg"
-          >
-            Cancel
-          </button>
-          <div className="w-32">
-            <Button isLoading={isLoading}>Create role</Button>
-          </div>
-        </div>
-      </form>
-    </Modal>
-  );
-}
+// What each level of the structure can see. Shown under the table so it's
+// clear that permissions say WHAT a role may do, while the level says WHERE.
+const LEVEL_DESCRIPTIONS = [
+  { level: 'global', text: 'Super Admin and Admin manage everything, in every continent and country.' },
+  { level: 'continent', text: 'Continent Overseer sees and manages only the continent they are assigned to.' },
+  { level: 'country', text: 'Country Overseer sees and manages only their country, including its centers.' },
+  { level: 'site', text: 'Site Coordinator sees and manages only the training site they are assigned to.' },
+];
 
 // Human-readable labels for permission names, since "disciple.view" reads
 // worse in a table than "View disciples". Also reused to build the clear
@@ -86,7 +38,6 @@ export function RolesPermissionsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
-  const [showNewRoleModal, setShowNewRoleModal] = useState(false);
   // Tracks which specific cell is mid-toggle so only that checkbox
   // shows a disabled/pending state, not the whole table.
   const [pendingCell, setPendingCell] = useState(null);
@@ -114,7 +65,7 @@ export function RolesPermissionsPage() {
     const role = roles.find((r) => r.id === roleId);
     const permission = permissions.find((p) => p.id === permissionId);
     const permissionLabel = permission ? PERMISSION_LABELS[permission.name] || permission.name : 'This permission';
-    const roleLabel = role?.name?.replace(/_/g, ' ') || 'this role';
+    const roleName = role ? role.label || roleLabel(role.name) : 'this role';
 
     setPendingCell(cellKey);
     setError('');
@@ -139,8 +90,8 @@ export function RolesPermissionsPage() {
       // they load a page in the app.
       setSuccessMessage(
         currentlyGranted
-          ? `"${permissionLabel}" was removed from the ${roleLabel} role. Anyone with this role will lose access to that action next time they load a page.`
-          : `"${permissionLabel}" was granted to the ${roleLabel} role. Anyone with this role will gain access to that action next time they load a page.`
+          ? `"${permissionLabel}" was removed from the ${roleName} role. Anyone with this role will lose access to that action next time they load a page.`
+          : `"${permissionLabel}" was granted to the ${roleName} role. Anyone with this role will gain access to that action next time they load a page.`
       );
     } catch (err) {
       // Roll back the optimistic change since the server rejected it.
@@ -152,7 +103,7 @@ export function RolesPermissionsPage() {
       });
       setError(
         err.response?.data?.error ||
-          `Could not update "${permissionLabel}" for the ${roleLabel} role. Please try again.`
+          `Could not update "${permissionLabel}" for the ${roleName} role. Please try again.`
       );
     } finally {
       setPendingCell(null);
@@ -164,12 +115,9 @@ export function RolesPermissionsPage() {
       <div className="flex items-center justify-between mb-2">
         <div>
           <h1 className="text-xl font-semibold text-gray-900">Roles and permissions</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Check a box to grant a permission to a role</p>
-        </div>
-        <div className="w-32">
-          <Button variant="secondary" type="button" onClick={() => setShowNewRoleModal(true)}>
-            + New role
-          </Button>
+          <p className="text-sm text-gray-500 mt-0.5">
+            Check a box to grant a permission to a role. What each role can see is set by its level.
+          </p>
         </div>
       </div>
 
@@ -196,8 +144,11 @@ export function RolesPermissionsPage() {
               <tr className="border-b border-gray-200 text-left text-gray-500">
                 <th className="px-5 py-3 font-medium">Permission</th>
                 {roles.map((role) => (
-                  <th key={role.id} className="px-5 py-3 font-medium text-center whitespace-nowrap capitalize">
-                    {role.name.replace(/_/g, ' ')}
+                  <th key={role.id} className="px-5 py-3 font-medium text-center whitespace-nowrap">
+                    <div>{role.label || roleLabel(role.name)}</div>
+                    <div className="text-[10px] font-normal uppercase tracking-wide text-gray-400">
+                      {LEVEL_LABELS[role.level] || ''}
+                    </div>
                   </th>
                 ))}
               </tr>
@@ -231,21 +182,18 @@ export function RolesPermissionsPage() {
         )}
       </div>
 
-      <div className="bg-gray-50 rounded-lg px-3 py-2.5 mt-4 text-xs text-gray-500">
-        Creating a new role starts with zero permissions checked — switch on only what that
-        role needs.
+      <div className="bg-gray-50 rounded-lg px-4 py-3 mt-4 text-xs text-gray-500 space-y-1">
+        <p className="font-semibold text-gray-600">Who sees what</p>
+        {LEVEL_DESCRIPTIONS.map((d) => (
+          <p key={d.level}>
+            <span className="font-medium text-gray-600">{LEVEL_LABELS[d.level]}:</span> {d.text}
+          </p>
+        ))}
+        <p className="pt-1">
+          The roles are fixed, so there is no "New role". Changing a box here changes what the
+          role may do, always inside its own area.
+        </p>
       </div>
-
-      {showNewRoleModal && (
-        <NewRoleModal
-          onClose={() => setShowNewRoleModal(false)}
-          onCreated={() => {
-            setShowNewRoleModal(false);
-            setSuccessMessage('New role created. It starts with no permissions — turn on what it needs above.');
-            loadMatrix();
-          }}
-        />
-      )}
     </AppLayout>
   );
 }

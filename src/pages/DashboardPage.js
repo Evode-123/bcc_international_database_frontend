@@ -71,7 +71,7 @@ function IconMapHero({ size = 22, color = BRAND }) {
 }
 
 // Used in place of the continents/countries cards on a site-scoped
-// dashboard (teacher, leader, ...), where "how many continents" is
+// dashboard (Site Coordinator), where "how many continents" is
 // meaningless -- this shows something about their own site instead.
 function IconGraduationHero({ size = 22, color = BRAND }) {
   return (
@@ -147,6 +147,74 @@ function GlobalReachSection({ stats }) {
   // them nothing. Show cards about their own site instead: how many
   // disciples they have, how many graduated this year, and the male/
   // female split.
+  // Country Overseers: a "how many continents" card would always say 1, so
+  // show centers and the male/female split for their country instead.
+  if (stats.scope?.level === 'country') {
+    const maleC = stats.byGender.find((g) => g.gender === 'Male')?.count ?? 0;
+    const femaleC = stats.byGender.find((g) => g.gender === 'Female')?.count ?? 0;
+
+    return (
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        <HeroStatCard
+          icon={<IconDisciplesHero color={BRAND} />}
+          label={`Disciples in ${stats.scope.name || 'your country'}`}
+          value={stats.totalDisciples.toLocaleString()}
+          color={BRAND}
+        />
+        <HeroStatCard
+          icon={<IconCenterHero color={VIOLET} />}
+          label="Centers with graduates"
+          value={(stats.centersReached ?? 0).toLocaleString()}
+          color={VIOLET}
+        />
+        <HeroStatCard
+          icon={<IconGraduationHero color={AMBER} />}
+          label={`Graduated in ${stats.currentYear}`}
+          value={(stats.graduatesThisYear ?? 0).toLocaleString()}
+          color={AMBER}
+        />
+        <HeroStatCard
+          icon={<IconMaleHero color={SKY} />}
+          label="Male / Female"
+          value={`${maleC.toLocaleString()} / ${femaleC.toLocaleString()}`}
+          color={SKY}
+        />
+      </div>
+    );
+  }
+
+  // Continent Overseers: same as the global view, minus "continents reached".
+  if (stats.scope?.level === 'continent') {
+    return (
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        <HeroStatCard
+          icon={<IconDisciplesHero color={BRAND} />}
+          label={`Disciples in ${stats.scope.name || 'your continent'}`}
+          value={stats.totalDisciples.toLocaleString()}
+          color={BRAND}
+        />
+        <HeroStatCard
+          icon={<IconMapHero color={AMBER} />}
+          label="Countries reached"
+          value={stats.byCountry.length}
+          color={AMBER}
+        />
+        <HeroStatCard
+          icon={<IconCenterHero color={VIOLET} />}
+          label="Centers with graduates"
+          value={(stats.centersReached ?? 0).toLocaleString()}
+          color={VIOLET}
+        />
+        <HeroStatCard
+          icon={<IconGraduationHero color={TEAL} />}
+          label={`Graduated in ${stats.currentYear}`}
+          value={(stats.graduatesThisYear ?? 0).toLocaleString()}
+          color={TEAL}
+        />
+      </div>
+    );
+  }
+
   if (stats.scopedToCenter) {
     const maleCount = stats.byGender.find((g) => g.gender === 'Male')?.count ?? 0;
     const femaleCount = stats.byGender.find((g) => g.gender === 'Female')?.count ?? 0;
@@ -341,7 +409,13 @@ export function DashboardPage() {
           <p className="text-sm text-gray-400 mt-0.5">
             {stats?.scopedToCenter
               ? `Showing your disciples${stats.site ? ` — ${[stats.site.centerName, stats.site.name].filter(Boolean).join(', ')}` : ''}`
-              : 'Global overview — all disciples across all locations'}
+              : stats?.scope?.level === 'country'
+                ? `Showing disciples in ${stats.scope.name || 'your country'}`
+                : stats?.scope?.level === 'continent'
+                  ? `Showing disciples in ${stats.scope.name || 'your continent'}`
+                  : stats?.scope?.level === 'none'
+                    ? 'Your account is not assigned to a location yet — ask an administrator to assign one.'
+                    : 'Global overview — all disciples across all locations'}
           </p>
         </div>
         <span className="text-xs text-gray-300 mt-1 hidden sm:block">
@@ -366,7 +440,7 @@ export function DashboardPage() {
           {/* ── Continent bar (signature element) — meaningless for a
                 single-site view where it would always show just one
                 continent, so it's admin/super_admin only. ── */}
-          {!stats.scopedToCenter && (
+          {(stats.scope?.level ?? 'global') === 'global' && !stats.scopedToCenter && (
             <ContinentBar data={stats.byContinent} total={stats.totalDisciples} />
           )}
 
@@ -405,7 +479,7 @@ export function DashboardPage() {
             {/* Top countries — meaningless for a single-site view where
                 it would always show just one country, so it's
                 admin/super_admin only. */}
-            {!stats.scopedToCenter && (
+            {!stats.scopedToCenter && stats.scope?.level !== 'country' && (
               <ChartCard title="Top countries" subtitle="Disciples per country" className="lg:col-span-2">
                 <ResponsiveContainer width="100%" height={Math.max(220, stats.byCountry.length * 30)}>
                   <BarChart

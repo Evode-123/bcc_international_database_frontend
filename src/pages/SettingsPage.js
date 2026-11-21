@@ -7,6 +7,7 @@ import { ErrorBanner, SuccessBanner } from '../components/Banners';
 import { useAuth } from '../context/AuthContext';
 import { setSessionEndedMessage } from '../api/client';
 import * as authApi from '../api/auth';
+import { roleLabel, scopeSummary } from '../utils/roles';
 
 const TABS = [
   { id: 'profile', label: 'My profile' },
@@ -29,7 +30,7 @@ function RoleBadge({ role }) {
     <span
       className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border capitalize ${style}`}
     >
-      {role.replace(/_/g, ' ')}
+      {roleLabel(role)}
     </span>
   );
 }
@@ -194,7 +195,8 @@ function MyProfileTab() {
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <InfoField label="Email" value={user?.email} />
-          <InfoField label="Role" value={user?.role?.replace(/_/g, ' ')} />
+          <InfoField label="Role" value={roleLabel(user?.role)} />
+          <InfoField label="Area" value={scopeSummary(user)} />
           <InfoField label="Member since" value={memberSince} />
           <InfoField
             label="Account status"

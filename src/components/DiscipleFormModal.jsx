@@ -7,6 +7,7 @@ import { ErrorBanner } from './Banners';
 import { useAuth } from '../context/AuthContext';
 import * as disciplesApi from '../api/disciples';
 import * as lookupsApi from '../api/lookups';
+import { useAutoSelectSingle } from '../hooks/useAutoSelectSingle';
 
 const GENDERS = ['Male', 'Female'];
 const TRAINING_MODES = ['Online', 'In-person'];
@@ -79,8 +80,7 @@ export function DiscipleFormModal({ discipleId, onClose, onSaved }) {
   const isEditMode = !!discipleId;
   const { user } = useAuth();
 
-  // Non-null only for site-scoped roles (teacher, leader, or any other
-  // non-admin role) -- see auth.controller.ts's shapeSiteInfo. When set,
+  // Non-null only for a Site Coordinator -- see auth.controller.ts's shapeSiteInfo. When set,
   // this disciple is always created/edited under this exact site and the
   // continent→country→center→site cascade below is replaced with a
   // read-only summary, matching what the backend enforces server-side
@@ -206,6 +206,12 @@ export function DiscipleFormModal({ discipleId, onClose, onSaved }) {
       }
     }).catch(() => {});
   }, [discipleCenterId]);
+
+  // Overseers only get their own continent/country/center back from the
+  // server, so a list with a single option is selected automatically.
+  useAutoSelectSingle(lockedSite ? [] : continents, discipleContinentId, setDiscipleContinentId);
+  useAutoSelectSingle(discipleCountries, discipleCountryId, setDiscipleCountryId);
+  useAutoSelectSingle(discipleCenters, discipleCenterId, setDiscipleCenterId);
 
   function set(field, value) {
     setForm((prev) => ({ ...prev, [field]: value }));

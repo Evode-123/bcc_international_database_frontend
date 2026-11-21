@@ -8,20 +8,51 @@ import { Button } from '../components/Button';
 import { ErrorBanner, SuccessBanner } from '../components/Banners';
 import * as adminUsersApi from '../api/adminUsers';
 import * as lookupsApi from '../api/lookups';
+import { useAutoSelectSingle } from '../hooks/useAutoSelectSingle';
+import { LEVEL_LABELS, roleBadgeClasses, roleLabel, roleLevel } from '../utils/roles';
 
-// Mirrors the backend's roleScope.util.ts: every role except admin/
-// super_admin is tied to exactly one site. Roles are created dynamically
-// on the Roles & Permissions page, so this can't be a hardcoded list of
-// names -- "leader", or anything else a super_admin names later, is
-// site-scoped the same way "teacher" is.
-function isSiteScopedRoleName(roleName) {
-  return roleName && roleName !== 'admin' && roleName !== 'super_admin';
+// What each level needs the person to pick, and the wording shown to the
+// user. 'global' (Super Admin / Admin) needs no location at all.
+const LEVEL_COPY = {
+  site: {
+    heading: 'Training site',
+    help: 'This user will only see and manage disciples of this training site.',
+    field: 'siteId',
+    missing: 'Please select the training site this user belongs to.',
+  },
+  country: {
+    heading: 'Country',
+    help: 'This user will see and manage everything in this country, including its centers.',
+    field: 'countryId',
+    missing: 'Please select the country this user oversees.',
+  },
+  continent: {
+    heading: 'Continent',
+    help: 'This user will see and manage everything in this continent.',
+    field: 'continentId',
+    missing: 'Please select the continent this user oversees.',
+  },
+};
+
+// Turns the chosen id into the one field the backend expects for that level.
+function buildLocation(level, id) {
+  const copy = LEVEL_COPY[level];
+  if (!copy || !id) return {};
+  return { [copy.field]: parseInt(id, 10) };
 }
 
-// Continent → country → center → site cascade, reused by both the invite
-// and edit-role modals below. Calls onSiteChange(siteId) whenever the
-// selected site changes (including back to '' when a parent is reset).
-function SiteScopePicker({ siteId, onSiteChange }) {
+// Picks the ONE location a role needs. The lists come from the backend
+// already limited to the area the logged-in person manages, so a Continent
+// Overseer only ever sees their own continent here, a Country Overseer only
+// their own country, and so on. When a list has a single option it is
+// selected automatically.
+//
+//   level 'continent' -> pick a continent
+//   level 'country'   -> continent → country
+//   level 'site'      -> continent → country → center → site
+function LocationPicker({ level, value, onChange }) {
+  const copy = LEVEL_COPY[level];
+
   const [continents, setContinents] = useState([]);
   const [countries, setCountries] = useState([]);
   const [centers, setCenters] = useState([]);
@@ -31,42 +62,53 @@ function SiteScopePicker({ siteId, onSiteChange }) {
   const [countryId, setCountryId] = useState('');
   const [centerId, setCenterId] = useState('');
 
+  const needsCountry = level === 'country' || level === 'site';
+  const needsCenter = level === 'site';
+
   useEffect(() => {
     lookupsApi.fetchContinents().then(setContinents).catch(() => {});
   }, []);
 
   useEffect(() => {
-    if (!continentId) { setCountries([]); return; }
+    if (!needsCountry || !continentId) { setCountries([]); return; }
     lookupsApi.fetchCountries(continentId).then(setCountries).catch(() => {});
-  }, [continentId]);
+  }, [continentId, needsCountry]);
 
   useEffect(() => {
-    if (!countryId) { setCenters([]); return; }
+    if (!needsCenter || !countryId) { setCenters([]); return; }
     lookupsApi.fetchCenters(countryId).then(setCenters).catch(() => {});
-  }, [countryId]);
+  }, [countryId, needsCenter]);
 
   useEffect(() => {
-    if (!centerId) { setSites([]); return; }
+    if (!needsCenter || !centerId) { setSites([]); return; }
     lookupsApi.fetchSites(centerId).then((s) => {
       setSites(s);
       // Center = site (no separate sub-sites) -- auto-select it silently.
-      if (s.length === 1 && s[0].isDefault) {
-        onSiteChange(String(s[0].id));
-      }
+      if (s.length === 1 && s[0].isDefault) onChange(String(s[0].id));
     }).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [centerId]);
+  }, [centerId, needsCenter]);
+
+  // A list with a single option (normal for overseers) is picked for them.
+  useAutoSelectSingle(continents, continentId, (id) => {
+    setContinentId(id);
+    if (level === 'continent') onChange(id);
+  });
+  useAutoSelectSingle(needsCountry ? countries : [], countryId, (id) => {
+    setCountryId(id);
+    if (level === 'country') onChange(id);
+  });
+  useAutoSelectSingle(needsCenter ? centers : [], centerId, setCenterId);
 
   const showSiteDropdown = sites.length > 0 && !(sites.length === 1 && sites[0].isDefault);
 
   return (
     <div className="bg-gray-50 rounded-xl border border-gray-200 p-3.5 mb-4">
       <p className="text-xs font-semibold text-gray-600 mb-2.5 uppercase tracking-wide">
-        Site <span className="text-red-500">*</span>
+        {copy.heading} <span className="text-red-500">*</span>
       </p>
-      <p className="text-xs text-gray-500 mb-3">
-        This user will only see and manage disciples belonging to this site.
-      </p>
+      <p className="text-xs text-gray-500 mb-3">{copy.help}</p>
+
       <Select
         label="Continent"
         value={continentId}
@@ -74,50 +116,54 @@ function SiteScopePicker({ siteId, onSiteChange }) {
           setContinentId(e.target.value);
           setCountryId('');
           setCenterId('');
-          onSiteChange('');
+          onChange(level === 'continent' ? e.target.value : '');
         }}
       >
         <option value="">Select continent</option>
         {continents.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
       </Select>
-      <Select
-        label="Country"
-        value={countryId}
-        disabled={!continentId}
-        onChange={(e) => {
-          setCountryId(e.target.value);
-          setCenterId('');
-          onSiteChange('');
-        }}
-      >
-        <option value="">Select country</option>
-        {countries.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-      </Select>
-      <Select
-        label="Center"
-        value={centerId}
-        disabled={!countryId}
-        onChange={(e) => {
-          setCenterId(e.target.value);
-          onSiteChange('');
-        }}
-      >
-        <option value="">Select center</option>
-        {centers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-      </Select>
-      {showSiteDropdown && (
+
+      {needsCountry && (
         <Select
-          label="Site"
-          value={siteId}
-          onChange={(e) => onSiteChange(e.target.value)}
+          label="Country"
+          value={countryId}
+          disabled={!continentId}
+          onChange={(e) => {
+            setCountryId(e.target.value);
+            setCenterId('');
+            onChange(level === 'country' ? e.target.value : '');
+          }}
         >
+          <option value="">Select country</option>
+          {countries.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </Select>
+      )}
+
+      {needsCenter && (
+        <Select
+          label="Center"
+          value={centerId}
+          disabled={!countryId}
+          onChange={(e) => {
+            setCenterId(e.target.value);
+            onChange('');
+          }}
+        >
+          <option value="">Select center</option>
+          {centers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </Select>
+      )}
+
+      {needsCenter && showSiteDropdown && (
+        <Select label="Site" value={value} onChange={(e) => onChange(e.target.value)}>
           <option value="">Select site</option>
           {sites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
         </Select>
       )}
-      {centerId && sites.length === 1 && sites[0].isDefault && (
+
+      {needsCenter && centerId && sites.length === 1 && sites[0].isDefault && (
         <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-xs text-blue-800">
-          This center has no separate sites — the center itself is the site.
+          This center has no separate sites — the center itself is the training site.
         </div>
       )}
     </div>
@@ -150,41 +196,60 @@ function StatusBadge({ user }) {
 }
 
 function RoleBadge({ role }) {
-  const styles =
-    role === 'super_admin'
-      ? 'bg-red-50 text-red-700'
-      : role === 'admin'
-      ? 'bg-gray-100 text-gray-700'
-      : 'bg-blue-50 text-blue-700';
-
   return (
-    <span className={`inline-block px-2.5 py-0.5 rounded-md text-xs font-medium ${styles}`}>
-      {role}
+    <span
+      className={`inline-block px-2.5 py-0.5 rounded-md text-xs font-medium ${roleBadgeClasses(role)}`}
+    >
+      {roleLabel(role)}
     </span>
   );
+}
+
+// The role dropdown shows the friendly name plus what it covers.
+function RoleOptions({ roles }) {
+  return roles.map((r) => (
+    <option key={r.id} value={r.name}>
+      {r.label || roleLabel(r.name)} ({LEVEL_LABELS[r.level || roleLevel(r.name)]})
+    </option>
+  ));
+}
+
+// Where this person works, as one line for the table.
+function areaText(user) {
+  switch (user.scopeLevel || roleLevel(user.role)) {
+    case 'site':
+      return (user.centerName ? `${user.centerName} — ${user.siteName}` : user.siteName) || null;
+    case 'country':
+      return user.countryName || null;
+    case 'continent':
+      return user.continentName || null;
+    default:
+      return 'All locations';
+  }
 }
 
 function InviteUserModal({ roles, onClose, onInvited }) {
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [roleName, setRoleName] = useState(roles[0]?.name || '');
-  const [siteId, setSiteId] = useState('');
+  const [locationId, setLocationId] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  const needsSite = isSiteScopedRoleName(roleName);
+  const level = roleLevel(roleName);
+  const needsLocation = level !== 'global';
 
   function handleRoleChange(e) {
     setRoleName(e.target.value);
-    setSiteId('');
+    setLocationId('');
   }
 
   async function handleSubmit(e) {
     e.preventDefault();
     setError('');
 
-    if (needsSite && !siteId) {
-      setError('Please select the site this user belongs to.');
+    if (needsLocation && !locationId) {
+      setError(LEVEL_COPY[level].missing);
       return;
     }
 
@@ -194,7 +259,7 @@ function InviteUserModal({ roles, onClose, onInvited }) {
         fullName.trim(),
         email.trim(),
         roleName,
-        needsSite ? parseInt(siteId, 10) : undefined
+        needsLocation ? buildLocation(level, locationId) : {}
       );
       onInvited();
     } catch (err) {
@@ -225,14 +290,13 @@ function InviteUserModal({ roles, onClose, onInvited }) {
           required
         />
         <Select label="Role" value={roleName} onChange={handleRoleChange} required>
-          {roles.map((r) => (
-            <option key={r.id} value={r.name}>
-              {r.name}
-            </option>
-          ))}
+          <RoleOptions roles={roles} />
         </Select>
 
-        {needsSite && <SiteScopePicker siteId={siteId} onSiteChange={setSiteId} />}
+        {needsLocation && (
+          // key = level, so switching role resets the pickers cleanly.
+          <LocationPicker key={level} level={level} value={locationId} onChange={setLocationId} />
+        )}
 
         <div className="bg-gray-50 rounded-lg px-3 py-2.5 mb-5 text-xs text-gray-500">
           A temporary password will be sent to this email. They'll be required to change it
@@ -257,27 +321,31 @@ function InviteUserModal({ roles, onClose, onInvited }) {
 
 function EditRoleModal({ user, roles, onClose, onUpdated }) {
   const [roleName, setRoleName] = useState(user.role);
-  const [siteId, setSiteId] = useState('');
+  const [locationId, setLocationId] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  const needsSite = isSiteScopedRoleName(roleName);
-  // True only when the role hasn't actually changed from what it already
-  // was -- in that case the user's existing site assignment still applies
-  // unless they explicitly pick a new one below.
-  const keepsExistingSite = needsSite && roleName === user.role && !!user.siteId;
+  const level = roleLevel(roleName);
+  const needsLocation = level !== 'global';
+
+  // True only while the role is still what it already was AND the user
+  // already has a location for it -- then that assignment still applies
+  // unless a new one is picked below.
+  const existingLocationId =
+    level === 'site' ? user.siteId : level === 'country' ? user.countryId : user.continentId;
+  const keepsExistingLocation = needsLocation && roleName === user.role && !!existingLocationId;
 
   function handleRoleChange(e) {
     setRoleName(e.target.value);
-    setSiteId('');
+    setLocationId('');
   }
 
   async function handleSubmit(e) {
     e.preventDefault();
     setError('');
 
-    if (needsSite && !siteId && !keepsExistingSite) {
-      setError('Please select the site this user belongs to.');
+    if (needsLocation && !locationId && !keepsExistingLocation) {
+      setError(LEVEL_COPY[level].missing);
       return;
     }
 
@@ -286,11 +354,11 @@ function EditRoleModal({ user, roles, onClose, onUpdated }) {
       await adminUsersApi.updateAdminUserRole(
         user.id,
         roleName,
-        needsSite && siteId ? parseInt(siteId, 10) : undefined
+        needsLocation && locationId ? buildLocation(level, locationId) : {}
       );
       onUpdated();
     } catch (err) {
-      setError(err.response?.data?.error || 'Could not update this user\'s role.');
+      setError(err.response?.data?.error || "Could not update this user's role.");
     } finally {
       setIsLoading(false);
     }
@@ -301,22 +369,18 @@ function EditRoleModal({ user, roles, onClose, onUpdated }) {
       <ErrorBanner message={error} />
       <form onSubmit={handleSubmit}>
         <Select label="Role" value={roleName} onChange={handleRoleChange} required>
-          {roles.map((r) => (
-            <option key={r.id} value={r.name}>
-              {r.name}
-            </option>
-          ))}
+          <RoleOptions roles={roles} />
         </Select>
 
-        {needsSite && (
+        {needsLocation && (
           <>
-            {keepsExistingSite && (
+            {keepsExistingLocation && (
               <div className="bg-gray-50 rounded-lg px-3 py-2.5 mb-3 text-xs text-gray-500">
-                Currently assigned to {user.centerName ? `${user.centerName} — ` : ''}
-                {user.siteName || 'a site'}. Select a site below only if you want to move them.
+                Currently assigned to {areaText(user) || 'a location'}. Select a new{' '}
+                {LEVEL_COPY[level].heading.toLowerCase()} below only if you want to move them.
               </div>
             )}
-            <SiteScopePicker siteId={siteId} onSiteChange={setSiteId} />
+            <LocationPicker key={level} level={level} value={locationId} onChange={setLocationId} />
           </>
         )}
 
@@ -383,35 +447,42 @@ export function ManageUsersPage() {
     loadData();
   }
 
+  // Overseers only see (and can only manage) people below them inside their
+  // own area; admins see everyone except Super Admins.
+  const level = currentUser?.scope?.level || 'global';
+  const visibilityNote =
+    currentUser?.role === 'super_admin'
+      ? null
+      : level === 'global'
+        ? "Super Admin accounts aren't shown here — only a Super Admin can view or manage those."
+        : 'You only see the users inside your own area, and you can only invite roles below yours.';
+
   return (
     <AppLayout>
       <div className="flex items-center justify-between mb-2">
         <div>
           <h1 className="text-xl font-semibold text-gray-900">Manage users</h1>
           <p className="text-sm text-gray-500 mt-0.5">
-            {users.length} admin account{users.length === 1 ? '' : 's'}
+            {users.length} user account{users.length === 1 ? '' : 's'}
           </p>
         </div>
         <div className="w-36">
-          <Button onClick={() => setShowInviteModal(true)} type="button">
+          <Button
+            onClick={() => setShowInviteModal(true)}
+            type="button"
+            disabled={roles.length === 0}
+          >
             + Invite user
           </Button>
         </div>
       </div>
- 
-      {/* Only shown to non-Super-Admins, so it's clear the list isn't
-          incomplete by accident -- Super Admin accounts are simply not
-          shown to (or manageable by) anyone else. */}
-      {currentUser?.role !== 'super_admin' && (
-        <p className="text-xs text-gray-400 mb-4">
-          Super Admin accounts aren't shown here — only a Super Admin can view or manage those.
-        </p>
-      )}
+
+      {visibilityNote && <p className="text-xs text-gray-400 mb-4">{visibilityNote}</p>}
 
       <ErrorBanner message={error} />
       <SuccessBanner message={successMessage} />
 
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden overflow-x-auto">
         {isLoading ? (
           <div className="p-8 text-center text-sm text-gray-400">Loading...</div>
         ) : (
@@ -421,7 +492,7 @@ export function ManageUsersPage() {
                 <th className="px-5 py-3 font-medium">Name</th>
                 <th className="px-5 py-3 font-medium">Email</th>
                 <th className="px-5 py-3 font-medium">Role</th>
-                <th className="px-5 py-3 font-medium">Site</th>
+                <th className="px-5 py-3 font-medium">Area</th>
                 <th className="px-5 py-3 font-medium">Status</th>
                 <th className="px-5 py-3 font-medium text-right">Actions</th>
               </tr>
@@ -431,19 +502,18 @@ export function ManageUsersPage() {
                 <tr key={user.id} className="border-b border-gray-100 last:border-0">
                   <td className="px-5 py-3 text-gray-900">{user.fullName || '—'}</td>
                   <td className="px-5 py-3 text-gray-600">{user.email}</td>
-                  <td className="px-5 py-3">
+                  <td className="px-5 py-3 whitespace-nowrap">
                     <RoleBadge role={user.role} />
                   </td>
                   <td className="px-5 py-3 text-gray-600">
-                    {isSiteScopedRoleName(user.role)
-                      ? (user.centerName ? `${user.centerName} — ${user.siteName}` : user.siteName) || '—'
-                      : <span className="text-gray-400">All sites</span>}
+                    {areaText(user) || <span className="text-amber-600">Not assigned</span>}
                   </td>
                   <td className="px-5 py-3">
                     <StatusBadge user={user} />
                   </td>
                   <td className="px-5 py-3 text-right">
-                    {user.role !== 'super_admin' && (
+                    {/* The backend says whether THIS person may manage THIS row. */}
+                    {user.canManage && (
                       <div className="flex items-center justify-end gap-3">
                         <button
                           onClick={() => setEditingRoleUser(user)}

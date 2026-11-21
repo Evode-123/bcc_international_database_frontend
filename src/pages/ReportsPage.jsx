@@ -4,6 +4,7 @@ import { ErrorBanner } from '../components/Banners';
 import { useAuth } from '../context/AuthContext';
 import * as disciplesApi from '../api/disciples';
 import * as lookupsApi from '../api/lookups';
+import { roleLabel, scopeSummary } from '../utils/roles';
 import { exportDisciplesToPdf, exportDisciplesToExcel } from '../utils/reportExport';
 
 function StatPill({ label, value }) {
@@ -35,8 +36,7 @@ function ExportButton({ onClick, disabled, children, icon }) {
 export function ReportsPage() {
   const { user } = useAuth();
 
-  // Site-scoped roles (leader, teacher, or any other non-admin role) are
-  // already locked to one site on the backend -- see getSiteScope() in
+  // Site Coordinators are already locked to one site on the backend -- see getSiteScope() in
   // disciple.controller.ts. For them the report needs no location filter
   // at all, just a name search, so the center/site pickers below are
   // hidden entirely rather than shown-but-disabled.
@@ -105,12 +105,16 @@ export function ReportsPage() {
     if (centerName) parts.push(`Center: ${centerName}`);
     if (siteName) parts.push(`Site: ${siteName}`);
     if (search) parts.push(`Search: "${search}"`);
-    return parts.length ? parts.join(' · ') : 'All disciples';
+    if (parts.length) return parts.join(' · ');
+    // Overseers: say which area the report covers instead of "All disciples".
+    return user?.scope && user.scope.level !== 'global'
+      ? `All disciples in ${scopeSummary(user)}`
+      : 'All disciples';
   }
 
   function generatedByLabel() {
     if (!user) return 'Unknown';
-    return `${user.fullName || user.email}${user.role ? ` (${user.role})` : ''}`;
+    return `${user.fullName || user.email}${user.role ? ` (${roleLabel(user.role)})` : ''}`;
   }
 
   function handleExportPdf() {
@@ -191,7 +195,7 @@ export function ReportsPage() {
         </div>
 
         {lockedSite ? (
-          // Leaders (and any other site-scoped role) already see only
+          // Site Coordinators already see only
           // their own site's disciples -- nothing left to filter, so we
           // just tell them what they're looking at.
           <span className="text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 whitespace-nowrap">
