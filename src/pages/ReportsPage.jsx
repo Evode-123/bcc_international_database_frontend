@@ -17,6 +17,66 @@ function StatPill({ label, value }) {
 }
 
 // Small toolbar button used for the two export actions.
+// Same rows-per-page choices and default as the Disciples page.
+const PAGE_SIZE_OPTIONS = [10, 15, 50];
+const DEFAULT_PAGE_SIZE = 15;
+
+// Pagination bar shown under the table -- identical to the one on the
+// Disciples page, so both screens behave the same way.
+function PaginationBar({ page, totalPages, totalItems, pageSize, onPageSizeChange, onPrev, onNext }) {
+  if (totalItems === 0) return null;
+
+  const start = (page - 1) * pageSize + 1;
+  const end = Math.min(page * pageSize, totalItems);
+
+  return (
+    <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-5 py-3.5 border-t border-gray-100">
+      <div className="flex items-center gap-3 order-2 sm:order-1">
+        <span className="text-xs text-gray-400">
+          Showing <span className="font-semibold text-gray-600">{start}–{end}</span> of{' '}
+          <span className="font-semibold text-gray-600">{totalItems}</span> disciples
+        </span>
+        <label className="flex items-center gap-1.5">
+          <span className="text-xs text-gray-400 whitespace-nowrap">Rows per page</span>
+          <select
+            value={pageSize}
+            onChange={(e) => onPageSizeChange(parseInt(e.target.value, 10))}
+            className="rounded-lg border border-gray-200 px-2 py-1 text-xs font-semibold text-gray-600 bg-white
+                       focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand"
+          >
+            {PAGE_SIZE_OPTIONS.map((size) => (
+              <option key={size} value={size}>{size}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <div className="flex items-center gap-2 order-1 sm:order-2">
+        <button
+          type="button"
+          onClick={onPrev}
+          disabled={page <= 1}
+          className="px-3.5 py-1.5 rounded-lg text-xs font-semibold border border-gray-200 text-gray-600
+                     hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+        >
+          ← Prev
+        </button>
+        <span className="text-xs font-semibold text-gray-500 px-1 whitespace-nowrap">
+          Page {page} of {totalPages}
+        </span>
+        <button
+          type="button"
+          onClick={onNext}
+          disabled={page >= totalPages}
+          className="px-3.5 py-1.5 rounded-lg text-xs font-semibold border border-gray-200 text-gray-600
+                     hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+        >
+          Next →
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function ExportButton({ onClick, disabled, children, icon }) {
   return (
     <button
@@ -53,6 +113,12 @@ export function ReportsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
 
+  // Paging happens in the browser (the list is already loaded in full), so
+  // only one page of rows is drawn at a time. The Excel / PDF exports below
+  // still use the WHOLE filtered list, not just the page on screen.
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+
   // Full center list, and the full site list (or just this center's
   // sites once one is picked) -- loaded once for admin/super_admin only.
   useEffect(() => {
@@ -88,6 +154,21 @@ export function ReportsPage() {
     const timer = setTimeout(loadDisciples, 300);
     return () => clearTimeout(timer);
   }, [loadDisciples]);
+
+  // Any change to the search, filters or page size goes back to page 1, so a
+  // narrower result set never leaves you on an empty later page.
+  useEffect(() => {
+    setPage(1);
+  }, [search, centerId, siteId, pageSize]);
+
+  const totalPages = Math.max(1, Math.ceil(disciples.length / pageSize));
+
+  // Keep the page in range if the list shrinks.
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
+
+  const paginatedDisciples = disciples.slice((page - 1) * pageSize, page * pageSize);
 
   function latestTraining(disciple) {
     if (!disciple.trainings?.length) return null;
@@ -257,51 +338,63 @@ export function ReportsPage() {
             <p className="text-xs text-gray-400 mt-1">Try adjusting your filters</p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr style={{ background: '#F4F9FE', borderBottom: '1px solid #D6E8F7' }} className="text-left">
-                  {['Full name', 'Center', 'Site', 'Grad. year', 'Mode'].map((h) => (
-                    <th key={h} className="px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {disciples.map((disciple) => {
-                  const training = latestTraining(disciple);
-                  return (
-                    <tr key={disciple.id} className="border-b border-gray-50 last:border-0">
-                      <td className="px-5 py-3.5">
-                        <div className="flex items-center gap-3">
-                          <div
-                            className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
-                            style={{ background: `hsl(${(disciple.id * 47) % 360},55%,48%)` }}
-                          >
-                            {disciple.familyName[0]?.toUpperCase()}
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr style={{ background: '#F4F9FE', borderBottom: '1px solid #D6E8F7' }} className="text-left">
+                    {['Full name', 'Center', 'Site', 'Grad. year', 'Mode'].map((h) => (
+                      <th key={h} className="px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginatedDisciples.map((disciple) => {
+                    const training = latestTraining(disciple);
+                    return (
+                      <tr key={disciple.id} className="border-b border-gray-50 last:border-0">
+                        <td className="px-5 py-3.5">
+                          <div className="flex items-center gap-3">
+                            <div
+                              className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
+                              style={{ background: `hsl(${(disciple.id * 47) % 360},55%,48%)` }}
+                            >
+                              {disciple.familyName[0]?.toUpperCase()}
+                            </div>
+                            <span className="font-medium text-gray-900 whitespace-nowrap">
+                              {disciple.familyName} {disciple.otherNames}
+                            </span>
                           </div>
-                          <span className="font-medium text-gray-900 whitespace-nowrap">
-                            {disciple.familyName} {disciple.otherNames}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="px-5 py-3.5 text-gray-500 whitespace-nowrap">{disciple.trainingSite?.center?.name || '—'}</td>
-                      <td className="px-5 py-3.5 text-gray-500 whitespace-nowrap">{disciple.trainingSite?.name || '—'}</td>
-                      <td className="px-5 py-3.5">
-                        {training?.graduationYear ? (
-                          <span className="inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold bg-brand-pale text-brand whitespace-nowrap">
-                            {training.graduationYear}
-                          </span>
-                        ) : '—'}
-                      </td>
-                      <td className="px-5 py-3.5 text-gray-500 text-xs whitespace-nowrap">{training?.trainingMode || '—'}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                        </td>
+                        <td className="px-5 py-3.5 text-gray-500 whitespace-nowrap">{disciple.trainingSite?.center?.name || '—'}</td>
+                        <td className="px-5 py-3.5 text-gray-500 whitespace-nowrap">{disciple.trainingSite?.name || '—'}</td>
+                        <td className="px-5 py-3.5">
+                          {training?.graduationYear ? (
+                            <span className="inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold bg-brand-pale text-brand whitespace-nowrap">
+                              {training.graduationYear}
+                            </span>
+                          ) : '—'}
+                        </td>
+                        <td className="px-5 py-3.5 text-gray-500 text-xs whitespace-nowrap">{training?.trainingMode || '—'}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <PaginationBar
+              page={page}
+              totalPages={totalPages}
+              totalItems={disciples.length}
+              pageSize={pageSize}
+              onPageSizeChange={setPageSize}
+              onPrev={() => setPage((p) => Math.max(1, p - 1))}
+              onNext={() => setPage((p) => Math.min(totalPages, p + 1))}
+            />
+          </>
         )}
       </div>
     </AppLayout>
