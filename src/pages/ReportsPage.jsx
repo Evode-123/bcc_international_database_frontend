@@ -5,7 +5,6 @@ import { useAuth } from '../context/AuthContext';
 import * as disciplesApi from '../api/disciples';
 import * as lookupsApi from '../api/lookups';
 import { roleLabel, scopeSummary } from '../utils/roles';
-import { exportDisciplesToPdf, exportDisciplesToExcel } from '../utils/reportExport';
 
 function StatPill({ label, value }) {
   return (
@@ -198,7 +197,10 @@ export function ReportsPage() {
     return `${user.fullName || user.email}${user.role ? ` (${roleLabel(user.role)})` : ''}`;
   }
 
-  function handleExportPdf() {
+  // The PDF and Excel libraries are big, so they are only downloaded the
+  // first time someone actually clicks an export button.
+  async function handleExportPdf() {
+    const { exportDisciplesToPdf } = await import('../utils/reportExport');
     exportDisciplesToPdf({
       disciples,
       filterSummary: buildFilterSummary(),
@@ -206,7 +208,8 @@ export function ReportsPage() {
     });
   }
 
-  function handleExportExcel() {
+  async function handleExportExcel() {
+    const { exportDisciplesToExcel } = await import('../utils/reportExport');
     exportDisciplesToExcel({
       disciples,
       filterSummary: buildFilterSummary(),

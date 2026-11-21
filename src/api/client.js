@@ -6,6 +6,20 @@ const baseURL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
 
 export const api = axios.create({ baseURL });
 
+// Free hosts put the backend to sleep after a while without traffic, and
+// the first request then waits for it to start up (can take a minute).
+// Calling /health the moment the site opens starts that wake-up while the
+// person is still typing their email and password, so by the time they
+// press "Sign in" the server is usually already awake.
+export function wakeServer() {
+  try {
+    const root = baseURL.replace(/\/api\/?$/, '');
+    fetch(`${root}/health`, { mode: 'no-cors', cache: 'no-store' }).catch(() => {});
+  } catch {
+    // Waking the server is best-effort -- never block the app on it.
+  }
+}
+
 const TOKEN_STORAGE_KEY = 'bcc_token';
 const SESSION_MESSAGE_KEY = 'bcc_session_message';
  

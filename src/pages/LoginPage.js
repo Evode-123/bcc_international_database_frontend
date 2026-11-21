@@ -22,10 +22,16 @@ export function LoginPage() {
   // sessionStorage via the same helper, and this reads it back out.
   const [sessionNotice, setSessionNotice] = useState(() => consumeSessionEndedMessage());
 
+  // True once a sign-in has been waiting a few seconds -- on free hosting
+  // that almost always means the server is waking up, so say so instead of
+  // leaving the person staring at "Please wait…".
+  const [isSlow, setIsSlow] = useState(false);
+
   async function handleSubmit(e) {
     e.preventDefault();
     setError('');
     setIsLoading(true);
+    const slowTimer = setTimeout(() => setIsSlow(true), 4000);
 
     try {
       const loggedInUser = await login(email, password);
@@ -45,6 +51,8 @@ export function LoginPage() {
         setError(err.response?.data?.error || 'Invalid email or password.');
       }
     } finally {
+      clearTimeout(slowTimer);
+      setIsSlow(false);
       setIsLoading(false);
     }
   }
@@ -118,6 +126,13 @@ export function LoginPage() {
           )}
 
           <ErrorBanner message={error} />
+
+          {isLoading && isSlow && (
+            <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+              The server is waking up after being idle. This can take up to a minute the
+              first time — please keep this page open.
+            </div>
+          )}
 
           <form onSubmit={handleSubmit} className="flex flex-col gap-5">
             <div className="flex flex-col gap-2">
